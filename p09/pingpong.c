@@ -50,7 +50,7 @@ int gotProcTime; //valor do clock quando uma tarefa pegou o processador
 void tick_handler ()
 {
   #ifdef DEBUG
-  printf ("Tick Handler disparado!\n") ;
+  printf ("Tick Handler disparado! Clock <%d>\n", clock) ;
   #endif
   clock++;//incrementa o clock
   if(CurrentTask != &Dispatcher){//por enquanto soh o dispatcher eh considerado de sistema
@@ -167,20 +167,30 @@ void wakeSleep()
 		task_t* aux_current; //var auxiliar para percorrer a fila
 		task_t* aux_task; //var auxiliar para remover e add nas filas
 		aux_current = FilaSleepTask;
-		do{
-			if(aux_current->wakeTime < clock){//se aux_current ja pode acordar
+		task_t* aux_last = FilaSleepTask->prev;
+		while(aux_current != aux_last)
+		{
+			if(aux_current->wakeTime <= clock)
+			{
 				aux_current->wakeTime = 0;
+				task_t* temp = aux_current->next;
 				//retira tarefa da fila Sleep
 				aux_task = (task_t*) queue_remove ((queue_t **) &FilaSleepTask, (queue_t*) aux_current);
 				//e coloca na fila Ready
 				queue_append((queue_t **) &FilaReadyTask, (queue_t*) aux_task);
-			}
-			aux_current = aux_current->next;
-		}while(aux_current != FilaSleepTask);
-	}else{
-		#ifdef DEBUG
-		printf("wakeSleep: Nenhuma tarefa dormindo\n");
-		#endif
+				aux_current = temp;
+			} else aux_current = aux_current->next;
+		}
+		if(aux_current->wakeTime <= clock && aux_current->next == FilaReadyTask)
+		{	
+			aux_current->wakeTime = 0;
+			task_t* temp = aux_current->next;
+			//retira tarefa da fila Sleep
+			aux_task = (task_t*) queue_remove ((queue_t **) &FilaSleepTask, (queue_t*) aux_current);
+			//e coloca na fila Ready
+			queue_append((queue_t **) &FilaReadyTask, (queue_t*) aux_task);
+			aux_current = temp;
+		}
 	}
 }
 
