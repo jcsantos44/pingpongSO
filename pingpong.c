@@ -39,8 +39,9 @@ struct itimerval timer;
 *Dispatcher - struct da tarefa Dispatcher;
 *CurrentTask - endereco da struct da tarefa atualmente sendo executada;
 *FilaReadyTask - endereco da primeira struct da fila de tarefas prontas;
+*FilaTask - endereco da primeira struct da fila de tarefas suspensas;
 **/
-task_t MainTask, Dispatcher, *CurrentTask, *FilaReadyTask;
+task_t MainTask, Dispatcher, *CurrentTask, *FilaReadyTask, *FilaTask;
 int task_count = 0;
 int current_quantum; //quantum da tarefa atual
 int clock; //referencia de tempo do sistema
@@ -87,16 +88,19 @@ task_t *scheduler()
   aux_current = FilaReadyTask->next;
   while(aux_current != FilaReadyTask){
     //se tiverem mesma prioridade, pega a com ID menor
-    if(aux_current->aging_prio == highestTask->aging_prio && aux_current->tid < highestTask->tid){
+    if(aux_current->aging_prio == highestTask->aging_prio && aux_current->tid < highestTask->tid && aux_current->suspend != 1){
       highestTask = aux_current;
     }
 
-    if(aux_current->aging_prio < highestTask->aging_prio){
+    if(aux_current->aging_prio < highestTask->aging_prio && aux_current->suspend != 1){
+      #ifdef DEBUG
+      if(aux_current->suspend == 1)
+        printf("A tarefa %d esta suspensa\n", aux_current->tid);
+      #endif
       highestTask = aux_current;
     }
     aux_current = aux_current->next;
   }
-
 
   //retira a tarefa de maior prioridade dafila
   next = (task_t*) queue_remove ((queue_t **) &FilaReadyTask, (queue_t*) highestTask);
@@ -169,7 +173,7 @@ void dispatcher_body ()
 void isUserTask(task_t* task){
   //por enquanto, se a tarefa nao for a Main e o Dispathcer, ela eh de usuario
   //Main tambem eh escalonavel
-  if(/*task != &MainTask && task->tid > 0 &&*/ task != &Dispatcher){//task criada eh de usuario e precisa ser adicionado na fila de prontas
+  if(/*task != &MainTask && task->tid > 0 &&*/ task != &Dispatcher && task->suspend != 1){//task criada eh de usuario e precisa ser adicionado na fila de prontas
     #ifdef DEBUG
     printf("isUserTask: Adicionando tarefa <%d> de usuario na lista de prontas\n", task->tid);
     #endif
@@ -186,6 +190,7 @@ void initTask(task_t* task, int task_id, int priority)
   task->exec_start = clock; //Seta o tempo que a tarefa foi criada
   task->proc_time = 0; //Seta o tempo que a tarefa passou no processador
   task->activations = 0; //Seta quantidade de ativacoes
+  task->suspend = 0;
   //isUserTask(task); //adiciona task na fila
 }
 
@@ -214,8 +219,8 @@ void pingpong_init()
   }
 
   // ajusta valores do temporizador
-  timer.it_value.tv_usec = 1000 ;      // primeiro disparo, em micro-segundos
-  timer.it_interval.tv_usec = 1000 ;   // disparos subsequentes, em micro-segundos
+  timer.it_value.tv_usec = 100 ;      // primeiro disparo, em micro-segundos
+  timer.it_interval.tv_usec = 100 ;   // disparos subsequentes, em micro-segundos
 
   // arma o temporizador ITIMER_REAL (vide man setitimer)
   if (setitimer (ITIMER_REAL, &timer, 0) < 0)
@@ -256,8 +261,10 @@ void pingpong_init()
   task_create(&Dispatcher, dispatcher_body, NULL);
   //inicializa a fila
   FilaReadyTask = NULL;
+  //inicializa fila de tarefas suspensas
+  FilaTask = NULL;
   //Inicializa Main como escalonavel
-  initTask(&MainTask, 0, 0);
+  initTask(&MainTask, 0, 1); //Prioridade um pois nao esta na fila ainda
 
 }
 
@@ -374,6 +381,12 @@ void task_exit (int exitCode)
    exec_time = clock - CurrentTask->exec_start;//Tempo de execucao da tarefa terminada
    proc_time = CurrentTask->proc_time; //Tempo de processamento da tarefa terminada
    actv = CurrentTask->activations; //Quantidade de ativacoes da tarefa terminada
+   task_resume(CurrentTask->joined);
+   #ifdef DEBUG
+   printf("A tarefa %d liberou a tarefa %d\n", CurrentTask->tid, CurrentTask->joined->tid);
+   #endif
+   if(CurrentTask->joined != NULL)
+    CurrentTask->joined = NULL;
    printf("Task %d exit: execution time %4d ms, processor time %4d ms, %4d activations\n", tid,  exec_time, proc_time, actv);
    //verificar se a tarefa terminada eh do usuario ou o dispatcher
    if(CurrentTask->tid == Dispatcher.tid){
@@ -395,6 +408,50 @@ int task_id ()
    printf("task_id: ID da tarefa %d atual\n", CurrentTask->tid);
    #endif
    return CurrentTask->tid; //retorna id da task atual
+}
+
+void task_suspend (task_t *task, task_t **queue)
+{
+  #ifdef DEBUG
+  printf("Tentando suspender tarefa %d\n", task->tid);
+  #endif
+  if(task == NULL)
+  {
+    printf("Tarefa invalida\n");
+    return;
+  }
+  if(task != &Dispatcher){ //ter certeza que nao eh o dispatcher
+    task->suspend = 1;
+    #ifdef DEBUG
+    printf("Adicionando tarefa <%d> na lista de suspensas\n", task->tid);
+    #endif
+    queue_append((queue_t **) &FilaTask, (queue_t*) task);
+  }
+}
+
+void task_resume (task_t *task)
+{
+//  #ifdef DEBUG
+  printf("Tentando resumir a tarefa %d\n", task->tid);
+//  #endif
+  if(task == NULL)
+  {
+    printf("Tarefa invalida\n");
+    return;
+  }
+  if(task != &Dispatcher)
+  {
+    task->suspend = 0;
+    #ifdef DEBUG
+    printf("Retirando tarefa <%d> da lista de suspensas\n", task->tid);
+    #endif
+    queue_remove((queue_t **) &FilaTask, (queue_t*) task);
+
+    #ifdef DEBUG
+    printf("Acordando tarefa <%d>\n", task->tid);
+    #endif
+    isUserTask(task);
+  }
 }
 
 void task_yield()
@@ -440,7 +497,6 @@ void task_setprio(task_t *task, int prio)
   task->aging_prio = prio;
 }
 
-
 int task_getprio (task_t *task)
 {
   int prio;
@@ -462,6 +518,24 @@ int task_getprio (task_t *task)
   #endif
 
   return prio;
+}
+
+int task_join(task_t* task)
+{
+  if (&task == NULL)
+  {
+    #ifdef DEBUG
+    printf("Nao eh possivel dar join, tarefa inexistente\n");
+    #endif
+    return -1;
+  }
+  #ifdef DEBUG
+  printf("A tarefa %d esta dando join na tarefa %d\n", CurrentTask->tid, task->tid);
+  printf("Suspender a tarefa %d\n", CurrentTask->tid);
+  #endif
+  task->joined = CurrentTask;
+  task_suspend(CurrentTask, &FilaTask);
+  task_yield();
 }
 
 

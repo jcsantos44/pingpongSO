@@ -20,12 +20,14 @@
 typedef struct task_t
 {
   struct task_t *prev, *next ; // para usar com a biblioteca de filas (cast)
+  struct task_t *joined ; //joined task
   int tid ; // ID da tarefa
   int static_prio; //prioridade estática
   int aging_prio; //prioridade dinamica
   int exec_start; //valor do clock quando a tarefa foi criada
   int proc_time; //tempo de processamento
   int activations; //quantidade de ativacoes
+  int suspend;
   ucontext_t context;
 } task_t ;
 

@@ -13,6 +13,10 @@
 
 void queue_append (queue_t **queue, queue_t *elem)
 {
+  #ifdef DEBUG
+  printf("Adicionando na fila\n");
+  #endif
+
   queue_t* aux; //endereco do elemento que ainda nao foi add na fila
   queue_t* first; //endereco do primeiro elementa da fila
 
@@ -43,13 +47,22 @@ void queue_append (queue_t **queue, queue_t *elem)
 
   //-------------_ADD NA FILA_--------------------
 
+  #ifdef DEBUG
+  printf("Aqui\n");
+  #endif
   if(first == NULL){//primeiro elemento da fila nao existe(fila esta vazia)
+    #ifdef DEBUG
+    printf("Aqui\n");
+    #endif
     first = aux; //atribui o elemento adicionado ao primeiro elemento da fila(endereco)
     //first nao esta mais apontando pro endereco de *queue(o primeiro), entao tem que fazer *queue apontar para o endereco de first
     *queue = first;
     //fila circular duplamente encadeada(p00-biblioteca-filas.pdf)
     first->next = first;
     first->prev = first;
+    #ifdef DEBUG
+    printf("Aqui\n");
+    #endif
     return;
   }else{//fila nao esta vazia -> add ao final dela
     //pegar o ultimo elemento da fila
