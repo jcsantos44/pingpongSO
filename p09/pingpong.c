@@ -39,9 +39,8 @@ struct itimerval timer;
 *Dispatcher - struct da tarefa Dispatcher;
 *CurrentTask - endereco da struct da tarefa atualmente sendo executada;
 *FilaReadyTask - endereco da primeira struct da fila de tarefas prontas;
-*FilaTask - endereco da primeira struct da fila de tarefas suspensas;
 **/
-task_t MainTask, Dispatcher, *CurrentTask, *FilaReadyTask, *FilaTask;
+task_t MainTask, Dispatcher, *CurrentTask, *FilaReadyTask;
 int task_count = 0;
 int current_quantum; //quantum da tarefa atual
 int clock; //referencia de tempo do sistema
@@ -83,26 +82,33 @@ task_t *scheduler()
     return NULL;
   }
 
-  //inicialmente a tarefa de maior prioridade eh a primeira da lista
+  //inicialmente a tarefa de maior prioridade eh a primeira da lista, que nao esta esperando outra tarefa terminar
   highestTask = FilaReadyTask;
-  aux_current = FilaReadyTask->next;
+	while(highestTask->wJoin != NULL){//highestTask nao pode estar esperando por outra tarefa
+		highestTask = highestTask->next;
+	}
+  aux_current = highestTask->next;
   while(aux_current != FilaReadyTask){
-    //se tiverem mesma prioridade, pega a com ID menor
-    if(aux_current->aging_prio == highestTask->aging_prio && aux_current->tid < highestTask->tid && aux_current->suspend != 1){
-      highestTask = aux_current;
-    }
+		if(aux_current->wJoin == NULL){//tarefa nao pode estar esperando por outra
+			//se tiverem mesma prioridade, pega a com ID menor
+		  if(aux_current->aging_prio == highestTask->aging_prio && aux_current->tid < highestTask->tid){
+		    highestTask = aux_current;
+		  }
 
-    if(aux_current->aging_prio < highestTask->aging_prio && aux_current->suspend != 1){
-      #ifdef DEBUG
-      if(aux_current->suspend == 1)
-        printf("A tarefa %d esta suspensa\n", aux_current->tid);
-      #endif
-      highestTask = aux_current;
-    }
+		  if(aux_current->aging_prio < highestTask->aging_prio){
+		    highestTask = aux_current;
+		  }
+		}else
+		{
+			#ifdef DEBUG
+		  printf("scheduler: IGNORAR tarefa %d, aguardando outra tarefa.\n", aux_current->tid);
+		  #endif
+		}
     aux_current = aux_current->next;
   }
 
-  //retira a tarefa de maior prioridade dafila
+
+  //retira a tarefa de maior prioridade da fila
   next = (task_t*) queue_remove ((queue_t **) &FilaReadyTask, (queue_t*) highestTask);
   #ifdef DEBUG
   printf("scheduler: A tarefa %d tem a maior prioridade: %d.\n", next->tid, next->aging_prio);
@@ -117,15 +123,17 @@ task_t *scheduler()
     aux_current = FilaReadyTask;
     int aging_p;
     do{
-      aging_p = aux_current->aging_prio;
-      aging_p += agingAlpha; //aumenta a prioridade(envelhece)
-      if(aging_p < highestPrio){//nao deixa passar do limite
-        aging_p = highestPrio;
-      }
-      aux_current->aging_prio = aging_p; //nova prioridade dinamica(envelhecida)
-      #ifdef DEBUG
-      printf("scheduler: Prioridade da tarefa %d envelhecida: %d.\n", aux_current->tid, aux_current->aging_prio);
-      #endif
+      if(aux_current->wJoin == NULL){
+				aging_p = aux_current->aging_prio;
+		    aging_p += agingAlpha; //aumenta a prioridade(envelhece)
+		    if(aging_p < highestPrio){//nao deixa passar do limite
+		      aging_p = highestPrio;
+		    }
+		    aux_current->aging_prio = aging_p; //nova prioridade dinamica(envelhecida)
+		    #ifdef DEBUG
+		    printf("scheduler: Prioridade da tarefa %d envelhecida: %d.\n", aux_current->tid, aux_current->aging_prio);
+		    #endif
+			}
       aux_current = aux_current->next; //passa para a proxima tarefa da fila
     }while(aux_current != FilaReadyTask);
   }
@@ -173,13 +181,28 @@ void dispatcher_body ()
 void isUserTask(task_t* task){
   //por enquanto, se a tarefa nao for a Main e o Dispathcer, ela eh de usuario
   //Main tambem eh escalonavel
-  if(/*task != &MainTask && task->tid > 0 &&*/ task != &Dispatcher && task->suspend != 1){//task criada eh de usuario e precisa ser adicionado na fila de prontas
+  if(/*task != &MainTask && task->tid > 0 &&*/ task != &Dispatcher){//task criada eh de usuario e precisa ser adicionado na fila de prontas
     #ifdef DEBUG
     printf("isUserTask: Adicionando tarefa <%d> de usuario na lista de prontas\n", task->tid);
     #endif
     queue_append((queue_t **) &FilaReadyTask, (queue_t*) task);
   }
 
+}
+
+//Funcao para acordar as tarefas esperando uma tarefa temrinar. Soh pode ser chamada pelo task_exit
+void wakeJoin(){
+	#ifdef DEBUG
+  printf("wakeJoin: Acordando tarefas que estao esperando a tarefa <%d> terminar\n", CurrentTask->tid);
+  #endif
+	task_t* aux_current; //var auxiliar para percorrer a fila
+	aux_current = FilaReadyTask;
+	do{
+		if(aux_current->wJoin == CurrentTask){//se aux_current esta esperando a tarefa atual terminar
+			aux_current->wJoin = NULL;
+		}
+		aux_current = aux_current->next;
+	}while(aux_current != FilaReadyTask);
 }
 
 //funcao para inicializar os paramentros de uma tarefa e adicionar na fila
@@ -190,7 +213,8 @@ void initTask(task_t* task, int task_id, int priority)
   task->exec_start = clock; //Seta o tempo que a tarefa foi criada
   task->proc_time = 0; //Seta o tempo que a tarefa passou no processador
   task->activations = 0; //Seta quantidade de ativacoes
-  task->suspend = 0;
+	task->wJoin = NULL;//Seta endereco da tarefa sendo esperada
+	task->exitCode = 9999;// Seta exitCode da task. 9999 = Tarefa sendo executada / <0 = Erro / >0 = Finalizou
   //isUserTask(task); //adiciona task na fila
 }
 
@@ -261,10 +285,8 @@ void pingpong_init()
   task_create(&Dispatcher, dispatcher_body, NULL);
   //inicializa a fila
   FilaReadyTask = NULL;
-  //inicializa fila de tarefas suspensas
-  FilaTask = NULL;
   //Inicializa Main como escalonavel
-  initTask(&MainTask, 0, 1); //Prioridade um pois nao esta na fila ainda
+  initTask(&MainTask, 0, 1);//Main iniciada com prioridade menor pois ela ja eh a CurrentTask
 
 }
 
@@ -373,6 +395,8 @@ void task_exit (int exitCode)
    if(exitCode < 0){
      printf("Tarefa terminou com erro \n");
    }
+		CurrentTask->exitCode = exitCode;
+		wakeJoin();//acordar as tarefas que estao esperando pelo fim da tarefa atual
    //soma uma ultiama vez o tempo de processamento
    proc_time = clock - gotProcTime;
    CurrentTask->proc_time += proc_time;
@@ -381,12 +405,6 @@ void task_exit (int exitCode)
    exec_time = clock - CurrentTask->exec_start;//Tempo de execucao da tarefa terminada
    proc_time = CurrentTask->proc_time; //Tempo de processamento da tarefa terminada
    actv = CurrentTask->activations; //Quantidade de ativacoes da tarefa terminada
-   task_resume(CurrentTask->joined);
-   #ifdef DEBUG
-   printf("A tarefa %d liberou a tarefa %d\n", CurrentTask->tid, CurrentTask->joined->tid);
-   #endif
-   if(CurrentTask->joined != NULL)
-    CurrentTask->joined = NULL;
    printf("Task %d exit: execution time %4d ms, processor time %4d ms, %4d activations\n", tid,  exec_time, proc_time, actv);
    //verificar se a tarefa terminada eh do usuario ou o dispatcher
    if(CurrentTask->tid == Dispatcher.tid){
@@ -402,56 +420,39 @@ void task_exit (int exitCode)
    }
 }
 
+int task_join (task_t *task)
+{
+    if(task == NULL){//se a tarefa a ser esperada nao existe, retorna 1
+     #ifdef DEBUG
+     printf("task_join: Task join invalido. Task a ser esperada nao existe\n");
+     #endif
+     return -1;
+   }
+    if(task->exitCode != 9999){//se a tarefa a ser esperada ja terminou, retorna seu exitCode
+			#ifdef DEBUG
+      printf("task_join: Task a ser esperada ja terminou com o codigo %d\n",task->exitCode);
+      #endif
+			return task->exitCode;
+    }
+
+		#ifdef DEBUG
+   	printf("task_join: Tarefa %d esperando termino da tarefa: %d\n", CurrentTask->tid, task->tid);
+   	#endif
+		
+		//indicando que a tarefa corrente ira esperar outra tarefa terminar
+		CurrentTask->wJoin = task;
+
+		task_yield();
+
+		return task->exitCode;
+}
+
 int task_id ()
 {
    #ifdef DEBUG
    printf("task_id: ID da tarefa %d atual\n", CurrentTask->tid);
    #endif
    return CurrentTask->tid; //retorna id da task atual
-}
-
-void task_suspend (task_t *task, task_t **queue)
-{
-  #ifdef DEBUG
-  printf("Tentando suspender tarefa %d\n", task->tid);
-  #endif
-  if(task == NULL)
-  {
-    printf("Tarefa invalida\n");
-    return;
-  }
-  if(task != &Dispatcher){ //ter certeza que nao eh o dispatcher
-    task->suspend = 1;
-    #ifdef DEBUG
-    printf("Adicionando tarefa <%d> na lista de suspensas\n", task->tid);
-    #endif
-    queue_append((queue_t **) &FilaTask, (queue_t*) task);
-  }
-}
-
-void task_resume (task_t *task)
-{
-//  #ifdef DEBUG
-  printf("Tentando resumir a tarefa %d\n", task->tid);
-//  #endif
-  if(task == NULL)
-  {
-    printf("Tarefa invalida\n");
-    return;
-  }
-  if(task != &Dispatcher)
-  {
-    task->suspend = 0;
-    #ifdef DEBUG
-    printf("Retirando tarefa <%d> da lista de suspensas\n", task->tid);
-    #endif
-    queue_remove((queue_t **) &FilaTask, (queue_t*) task);
-
-    #ifdef DEBUG
-    printf("Acordando tarefa <%d>\n", task->tid);
-    #endif
-    isUserTask(task);
-  }
 }
 
 void task_yield()
@@ -497,6 +498,7 @@ void task_setprio(task_t *task, int prio)
   task->aging_prio = prio;
 }
 
+
 int task_getprio (task_t *task)
 {
   int prio;
@@ -518,24 +520,6 @@ int task_getprio (task_t *task)
   #endif
 
   return prio;
-}
-
-int task_join(task_t* task)
-{
-  if (&task == NULL)
-  {
-    #ifdef DEBUG
-    printf("Nao eh possivel dar join, tarefa inexistente\n");
-    #endif
-    return -1;
-  }
-  #ifdef DEBUG
-  printf("A tarefa %d esta dando join na tarefa %d\n", CurrentTask->tid, task->tid);
-  printf("Suspender a tarefa %d\n", CurrentTask->tid);
-  #endif
-  task->joined = CurrentTask;
-  task_suspend(CurrentTask, &FilaTask);
-  task_yield();
 }
 
 
