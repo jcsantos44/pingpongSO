@@ -19,7 +19,7 @@
 
 #define STACKSIZE 32768		/* tamanho de pilha das threads */
 #define _XOPEN_SOURCE 600	/* para compilar no MacOS */
-//#define DEBUG
+#define DEBUG
 
 /*****************************************************/
 
@@ -40,7 +40,7 @@ struct itimerval timer;
 *CurrentTask - endereco da struct da tarefa atualmente sendo executada;
 *FilaReadyTask - endereco da primeira struct da fila de tarefas prontas;
 **/
-task_t MainTask, Dispatcher, *CurrentTask, *FilaReadyTask;
+task_t MainTask, Dispatcher, *CurrentTask, *FilaReadyTask, *FilaSleepTask;
 int task_count = 0;
 int current_quantum; //quantum da tarefa atual
 int clock; //referencia de tempo do sistema
@@ -157,6 +157,33 @@ task_t *scheduler()
   }
 }*/
 
+//Funcao para acordar as tarefas que estao dormindo e ja podem acordar
+void wakeSleep()
+{
+	#ifdef DEBUG
+  printf("wakeSleep: Acordando tarefas que podem acordar. ClockTime: %dms\n", clock);
+  #endif
+	if(queue_size((queue_t*)FilaSleepTask) > 0){
+		task_t* aux_current; //var auxiliar para percorrer a fila
+		task_t* aux_task; //var auxiliar para remover e add nas filas
+		aux_current = FilaSleepTask;
+		do{
+			if(aux_current->wakeTime < clock){//se aux_current ja pode acordar
+				aux_current->wakeTime = 0;
+				//retira tarefa da fila Sleep
+				aux_task = (task_t*) queue_remove ((queue_t **) &FilaSleepTask, (queue_t*) aux_current);
+				//e coloca na fila Ready
+				queue_append((queue_t **) &FilaReadyTask, (queue_t*) aux_task);
+			}
+			aux_current = aux_current->next;
+		}while(aux_current != FilaSleepTask);
+	}else{
+		#ifdef DEBUG
+		printf("wakeSleep: Nenhuma tarefa dormindo\n");
+		#endif
+	}
+}
+
 void dispatcher_body ()
 {
   #ifdef DEBUG
@@ -164,6 +191,7 @@ void dispatcher_body ()
   #endif
   task_t* next; //endereco da proxima tarefa a ser executada
   while(queue_size((queue_t*)FilaReadyTask) > 0){
+		wakeSleep();
     next = scheduler();
     if(next != NULL){
       #ifdef DEBUG
@@ -191,18 +219,25 @@ void isUserTask(task_t* task){
 }
 
 //Funcao para acordar as tarefas esperando uma tarefa temrinar. Soh pode ser chamada pelo task_exit
-void wakeJoin(){
+void wakeJoin()
+{
 	#ifdef DEBUG
   printf("wakeJoin: Acordando tarefas que estao esperando a tarefa <%d> terminar\n", CurrentTask->tid);
   #endif
-	task_t* aux_current; //var auxiliar para percorrer a fila
-	aux_current = FilaReadyTask;
-	do{
-		if(aux_current->wJoin == CurrentTask){//se aux_current esta esperando a tarefa atual terminar
-			aux_current->wJoin = NULL;
-		}
-		aux_current = aux_current->next;
-	}while(aux_current != FilaReadyTask);
+	if(queue_size((queue_t*)FilaReadyTask) > 0){
+		task_t* aux_current; //var auxiliar para percorrer a fila
+		aux_current = FilaReadyTask;
+		do{
+			if(aux_current->wJoin == CurrentTask){//se aux_current esta esperando a tarefa atual terminar
+				aux_current->wJoin = NULL;
+			}
+			aux_current = aux_current->next;
+		}while(aux_current != FilaReadyTask);
+	}else{
+		#ifdef DEBUG
+		printf("wakeJoin: Fila Ready vazia\n");
+		#endif
+	}
 }
 
 //funcao para inicializar os paramentros de uma tarefa e adicionar na fila
@@ -215,6 +250,7 @@ void initTask(task_t* task, int task_id, int priority)
   task->activations = 0; //Seta quantidade de ativacoes
 	task->wJoin = NULL;//Seta endereco da tarefa sendo esperada
 	task->exitCode = 9999;// Seta exitCode da task. 9999 = Tarefa sendo executada / <0 = Erro / >0 = Finalizou
+	task->wakeTime = 0; //Seta valor do clock que a tarefa deve ser acordada
   //isUserTask(task); //adiciona task na fila
 }
 
@@ -283,14 +319,14 @@ void pingpong_init()
 
   //criando o dispatcher
   task_create(&Dispatcher, dispatcher_body, NULL);
-  //inicializa a fila
+  //inicializa a fila Ready
   FilaReadyTask = NULL;
+	//inicializa a fila Sleep
+  FilaSleepTask = NULL;
   //Inicializa Main como escalonavel
-  initTask(&MainTask, 0, 1);//Main iniciada com prioridade menor pois ela ja eh a CurrentTask
+  initTask(&MainTask, 0, 0);
 
 }
-
-
 
 int task_create (task_t* task, void (*start_func)(void *), void *arg)
 {
@@ -466,7 +502,8 @@ void task_yield()
     #endif
     task_exit(-1);
   }else{
-    isUserTask(CurrentTask);//add task no final da fila, se for task de usuario
+		if(CurrentTask->wakeTime == 0)//variavel nao pode estar dormindo para ser add na fila Ready
+    	isUserTask(CurrentTask);//add task no final da fila, se for task de usuario
     task_switch(&Dispatcher);//trocando para o dispatcher
   }
 }
@@ -522,6 +559,18 @@ int task_getprio (task_t *task)
   return prio;
 }
 
+void task_sleep (int t)
+{
+	#ifdef DEBUG
+  printf("task_sleep: Dando um mata leao na tarefa <%d>.\n",CurrentTask->tid);
+  #endif
+	CurrentTask->wakeTime = systime() + t*1000;//deve acordar daqui t*1000 ms
+	queue_append((queue_t **) &FilaSleepTask, (queue_t*) CurrentTask);//add CurrentTask na fila de Sleep
+	#ifdef DEBUG
+  printf("task_sleep: Tempo para acordar: <%dms> / Tamanho da fila Sleep <%d>.\n",CurrentTask->wakeTime,queue_size((queue_t*)FilaSleepTask));
+  #endif
+	task_yield();
+}
 
 unsigned int systime()
 {

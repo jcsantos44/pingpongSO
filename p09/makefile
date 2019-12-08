@@ -5,8 +5,8 @@ DEPS = queue.h datatypes.h pinpong.h
 %.o: %.c $(DEPS)
 	$(CC) -c -o $@ $< $(CFLAGS)
 
-join_task: pingpong.o queue.o pingpong-join.o
-	$(CC) -o join_task pingpong.c queue.c pingpong-join.c
+sleep_task: pingpong.o queue.o pingpong-sleep.o
+	$(CC) -o sleep_task pingpong.c queue.c pingpong-sleep.c
 
 clean:
 	rm *.o join_task

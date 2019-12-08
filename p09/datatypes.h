@@ -28,6 +28,7 @@ typedef struct task_t
   int activations; //quantidade de ativacoes
   struct task_t *wJoin; //esperando a tarefa wJoin terminar
   int exitCode; //Codigo com o qual a tarefa foi terminado. <0 = Erro / 9999 = nao terminado / >0 = Terminado
+	int wakeTime; //valor do clock quando a tarefa deve ser acordada. 0 = acordada
   ucontext_t context;
 } task_t ;
 
