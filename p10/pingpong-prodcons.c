@@ -14,16 +14,27 @@ semaphore_t s_buffer, s_item, s_vaga;
 int in_index = 0;
 int out_index = 0;
 
+void print_buffer()
+{
+  for(int i = 0; i < 5; i++)
+  {
+    printf("%d, ", buffer[i]);
+  } printf("\n");
+}
+
 void push(int i)
 {
-  buffer[in_index] = 0;
+  buffer[in_index] = i;
   in_index = (in_index+1)%5;
+  //print_buffer();
 }
 
 int pop()
 {
   int i = buffer[out_index];
   out_index = (out_index+1)%5;
+  //printf("\t\t");
+  //print_buffer();
   return i;
 }
 
@@ -52,10 +63,12 @@ void produtor(void* arg)
       {
         printf("erro sem_up: s_item nao existe ou foi excluido\n");
       }
+
+      printf("%s produziu %d\n", arg, item);
    }
 }
 
-void consumidor(char* arg)
+void consumidor(void* arg)
 {
   int item;
   while (1)
@@ -80,7 +93,7 @@ void consumidor(char* arg)
       printf("erro sem_up: s_vaga nao existe ou foi excluido\n");
     }
 
-    printf("%s consumiu %d", arg, item);
+    printf("%s consumiu %d\n", arg, item);
     task_sleep(1);
   }
 }
@@ -91,21 +104,22 @@ int main (int argc, char* argv[])
   srand(time(NULL));
   printf ("Main INICIO\n");
 
+  task_create(&c1, consumidor, "\t\tc1");
+  task_create(&c2, consumidor, "\t\tc2");
   task_create(&p1, produtor, "p1");
   task_create(&p2, produtor, "p2");
   task_create(&p3, produtor, "p3");
-  task_create(&c1, produtor, "\t\tc1");
-  task_create(&c2, produtor, "\t\tc1");
+
 
   sem_create(&s_buffer, 1);
   sem_create(&s_item, 0);
   sem_create(&s_vaga, 5);
 
-  task_join(&c1);
-  task_join(&c2);
-  task_join(&p1);
-  task_join(&p2);
-  task_join(&p3);
+  task_join(&c1); //suspende main ate todas as tarefas estarem concluidas
+  //task_join(&c2);
+  //task_join(&p1);
+  //task_join(&p2);
+  //task_join(&p3);
 
   printf ("Main FIM\n") ;
   task_exit(0);

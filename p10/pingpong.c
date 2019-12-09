@@ -45,12 +45,13 @@ int task_count = 0;
 int current_quantum; //quantum da tarefa atual
 int clock; //referencia de tempo do sistema
 int gotProcTime; //valor do clock quando uma tarefa pegou o processador
+int sem_count = 0;
 
 // tratador do sinal
 void tick_handler ()
 {
   #ifdef DEBUG
-  printf ("Tick Handler disparado! Clock <%d>\n", clock) ;
+  //printf ("Tick Handler disparado! Clock <%d>\n", clock) ;
   #endif
   clock++;//incrementa o clock
   if(CurrentTask != &Dispatcher){//por enquanto soh o dispatcher eh considerado de sistema
@@ -73,7 +74,7 @@ task_t *scheduler()
   task_t* aux_current; //var auxiliar para percorrer a fila
 
   #ifdef DEBUG
-  printf("scheduler: Recuperar tarefa de maior prioridade na fila. TamFila <%d>\n", queue_size((queue_t*)FilaReadyTask));
+  //printf("scheduler: Recuperar tarefa de maior prioridade na fila. TamFila <%d>\n", queue_size((queue_t*)FilaReadyTask));
   #endif
 
   if(queue_size((queue_t*)FilaReadyTask) == 0){//fila vazia
@@ -165,7 +166,7 @@ task_t *scheduler()
 void wakeSleep()
 {
 	#ifdef DEBUG
-  printf("wakeSleep: Acordando tarefas que podem acordar. ClockTime: %dms\n", clock);
+  //printf("wakeSleep: Acordando tarefas que podem acordar. ClockTime: %dms\n", clock);
   #endif
 	if(queue_size((queue_t*)FilaSleepTask) > 0){
 		task_t* aux_current; //var auxiliar para percorrer a fila
@@ -187,7 +188,7 @@ void wakeSleep()
 			} else aux_current = aux_current->next;
 		}
 		if(aux_current->wakeTime <= clock)
-		{	
+		{
 			aux_current->wakeTime = -1;
 //printf("wakeSleep: Acordando tarefa <%d> que pode acordar. ClockTime: %dms\n",aux_current->tid, clock);
 			task_t* temp = aux_current->next;
@@ -341,7 +342,7 @@ void pingpong_init()
 	//inicializa a fila Sleep
   FilaSleepTask = NULL;
   //Inicializa Main como escalonavel
-  initTask(&MainTask, 0, 0);
+  initTask(&MainTask, 0, 1);
 
 }
 
@@ -491,7 +492,7 @@ int task_join (task_t *task)
 		#ifdef DEBUG
    	printf("task_join: Tarefa %d esperando termino da tarefa: %d\n", CurrentTask->tid, task->tid);
    	#endif
-		
+
 		//indicando que a tarefa corrente ira esperar outra tarefa terminar
 		CurrentTask->wJoin = task;
 
@@ -631,34 +632,35 @@ int sem_create (semaphore_t *s, int value)
 	#endif
 	s->contador = value;
 	s->fila = NULL;
-
+  s->sid = sem_count;
+  sem_count++;
 	return 0;
 }
 
 int sem_down (semaphore_t *s)
 {
 	if(s == NULL){
-		#ifdef DEBUG
+		#if defined(DEBUG) || defined(DEBUGSEMAFORO)
 		printf("sem_down: Semaforo requisitado invalido. ERRO.\n");
 		#endif
 		return -1;
 	}
 
-	#ifdef DEBUG
-	printf("sem_down: Requisitando um semaforo.\n");
+	#if defined(DEBUG) || defined(DEBUGSEMAFORO)
+	printf("sem_down: Tarefa %d Requisitando o semaforo %d.\n", CurrentTask->tid, s->sid);
 	#endif
 	s->contador--;
-	
+
 	if(s->contador < 0){//suspender tarefa
-		#ifdef DEBUG
-		printf("sem_down: Semaforo cheio. Suspendendo tarefa <%d>.\n", CurrentTask->tid);
+		#if defined(DEBUG) || defined(DEBUGSEMAFORO)
+		printf("sem_down: Semaforo %d cheio. Suspendendo tarefa <%d>.\n", s->sid, CurrentTask->tid);
 		#endif
 		CurrentTask->semaforo = 1;//esperando por semaforo
 		queue_append((queue_t **) &s->fila, (queue_t*) CurrentTask);
 		task_yield();
 
 		if(CurrentTask->semaforo == 1){//retornou do semaforo destruido
-			return -1;			
+			return -1;
 		}
 	}
 
@@ -670,24 +672,24 @@ int sem_up (semaphore_t *s)
 {
 	task_t* aux;
 	if(s == NULL){
-		#ifdef DEBUG
+		#if defined(DEBUG) || defined(DEBUGSEMAFORO)
 		printf("sem_up: Semaforo requisitado invalido. ERRO.\n");
 		#endif
 		return -1;
 	}
-	
-	#ifdef DEBUG
-	printf("sem_up: Liberando um semaforo.\n");
+
+	#if defined(DEBUG) || defined(DEBUGSEMAFORO)
+	printf("sem_up: Tarefa %d Liberando o semaforo %d.\n", CurrentTask->tid, s->sid);
 	#endif
 	s->contador++;
 
 	if(queue_size((queue_t*)s->fila) > 0){
 		aux = (task_t*) queue_remove ((queue_t **) &s->fila, (queue_t*) s->fila);
-		#ifdef DEBUG
+		#if defined(DEBUG) || defined(DEBUGSEMAFORO)
 		printf("sem_up: Acordando task <%d>.\n",aux->tid);
 		#endif
 		aux->semaforo = 0;//nao esta mais esperando por semaforo
-		queue_append((queue_t **) &FilaReadyTask, (queue_t*) aux);		
+		queue_append((queue_t **) &FilaReadyTask, (queue_t*) aux);
 	}
 	return 0;
 }
@@ -705,7 +707,7 @@ int sem_destroy (semaphore_t *s)
 	#ifdef DEBUG
 	printf("sem_destroy: Acordando as tarefas.\n");
 	#endif
-
+  sem_count--;
 	while(queue_size((queue_t*)s->fila) > 0){
 		aux = (task_t*) queue_remove ((queue_t **) &s->fila, (queue_t*) s->fila);
 		queue_append((queue_t **) &FilaReadyTask, (queue_t*) aux);
