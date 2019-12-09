@@ -17,7 +17,7 @@ int out_index = 0;
 void push(int i)
 {
   buffer[in_index] = 0;
-  in_index = (in_index+1)%5
+  in_index = (in_index+1)%5;
 }
 
 int pop()
@@ -55,12 +55,12 @@ void produtor(void* arg)
    }
 }
 
-void consumidor(void* arg)
+void consumidor(char* arg)
 {
   int item;
   while (1)
   {
-    if(sem_down(s_item) != 0)
+    if(sem_down(&s_item) != 0)
     {
       printf("erro sem_down: s_item nao existe ou foi excluido\n");
     }

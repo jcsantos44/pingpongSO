@@ -11,5 +11,8 @@ sem_task: pingpong.o queue.o pingpong-semaphore.o
 racecond_task: pingpong.o queue.o pingpong-racecond.o
 	$(CC) -o racecond_task pingpong.c queue.c pingpong-racecond.c
 
+prodcons_task: pingpong.o queue.o pingpong-prodcons.o
+	$(CC) -o prodcons_task pingpong.c queue.c pingpong-prodcons.c
+
 clean:
 	rm *.o sem_task
