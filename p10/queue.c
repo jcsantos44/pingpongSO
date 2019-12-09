@@ -34,7 +34,7 @@ void queue_append (queue_t **queue, queue_t *elem)
     return;
   }else{//elemento existe -> verificar se esta isolado(p00-biblioteca-filas.pdf)
     if(elem->next != NULL || elem->prev != NULL){//se o elemento seguinte ou o elemento anterior existir, elemento nao esta isolado(ja faz parte de uma fila)
-      printf("$$$Elemento nao esta isolado (Esta em outra fila)\n");
+      printf("Elemento nao esta isolado (Esta em outra fila)\n");
       return;
     }else{//elemento existe e esta isolado -> atribui a aux(p00-biblioteca-filas.pdf)
       aux = elem;

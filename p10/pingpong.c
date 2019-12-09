@@ -265,6 +265,7 @@ void initTask(task_t* task, int task_id, int priority)
   task->proc_time = 0; //Seta o tempo que a tarefa passou no processador
   task->activations = 0; //Seta quantidade de ativacoes
 	task->wJoin = NULL;//Seta endereco da tarefa sendo esperada
+	task->semaforo = 0;//seta se esta esperando semaforo
 	task->exitCode = 9999;// Seta exitCode da task. 9999 = Tarefa sendo executada / <0 = Erro / >0 = Finalizou
 	task->wakeTime = -1; //Seta valor do clock que a tarefa deve ser acordada
   //isUserTask(task); //adiciona task na fila
@@ -518,7 +519,7 @@ void task_yield()
     #endif
     task_exit(-1);
   }else{
-		if(CurrentTask->wakeTime == -1){//variavel nao pode estar dormindo para ser add na fila Ready
+		if((CurrentTask->wakeTime == -1) && (CurrentTask->semaforo != 1)){//variavel nao pode estar dormindo para ser add na fila Ready
     	isUserTask(CurrentTask);//add task no final da fila, se for task de usuario
 		}
     task_switch(&Dispatcher);//trocando para o dispatcher
@@ -613,4 +614,101 @@ void print_elem (void *ptr)
 void tasks_print()
 {
   queue_print("fila de tarefas", (queue_t*) FilaReadyTask, print_elem);
+}
+
+//============SEMAFOROS==================
+int sem_create (semaphore_t *s, int value)
+{
+	if(s == NULL){//se nao tem semaforo, retorna erro
+		#ifdef DEBUG
+		printf("sem_create: Semaforo invalido. ERRO.\n");
+		#endif
+		return -1;
+	}
+
+	#ifdef DEBUG
+	printf("sem_create: Criando novo semaforo.\n");
+	#endif
+	s->contador = value;
+	s->fila = NULL;
+
+	return 0;
+}
+
+int sem_down (semaphore_t *s)
+{
+	if(s == NULL){
+		#ifdef DEBUG
+		printf("sem_down: Semaforo requisitado invalido. ERRO.\n");
+		#endif
+		return -1;
+	}
+
+	#ifdef DEBUG
+	printf("sem_down: Requisitando um semaforo.\n");
+	#endif
+	s->contador--;
+	
+	if(s->contador < 0){//suspender tarefa
+		#ifdef DEBUG
+		printf("sem_down: Semaforo cheio. Suspendendo tarefa <%d>.\n", CurrentTask->tid);
+		#endif
+		CurrentTask->semaforo = 1;//esperando por semaforo
+		queue_append((queue_t **) &s->fila, (queue_t*) CurrentTask);
+		task_yield();
+
+		if(CurrentTask->semaforo == 1){//retornou do semaforo destruido
+			return -1;			
+		}
+	}
+
+	return 0;
+
+}
+
+int sem_up (semaphore_t *s)
+{
+	task_t* aux;
+	if(s == NULL){
+		#ifdef DEBUG
+		printf("sem_up: Semaforo requisitado invalido. ERRO.\n");
+		#endif
+		return -1;
+	}
+	
+	#ifdef DEBUG
+	printf("sem_up: Liberando um semaforo.\n");
+	#endif
+	s->contador++;
+
+	if(queue_size((queue_t*)s->fila) > 0){
+		aux = (task_t*) queue_remove ((queue_t **) &s->fila, (queue_t*) s->fila);
+		#ifdef DEBUG
+		printf("sem_up: Acordando task <%d>.\n",aux->tid);
+		#endif
+		aux->semaforo = 0;//nao esta mais esperando por semaforo
+		queue_append((queue_t **) &FilaReadyTask, (queue_t*) aux);		
+	}
+	return 0;
+}
+
+int sem_destroy (semaphore_t *s)
+{
+	task_t* aux;
+	if(s == NULL){
+		#ifdef DEBUG
+		printf("sem_destroy: Semaforo requisitado invalido. ERRO.\n");
+		#endif
+		return -1;
+	}
+
+	#ifdef DEBUG
+	printf("sem_destroy: Acordando as tarefas.\n");
+	#endif
+
+	while(queue_size((queue_t*)s->fila) > 0){
+		aux = (task_t*) queue_remove ((queue_t **) &s->fila, (queue_t*) s->fila);
+		queue_append((queue_t **) &FilaReadyTask, (queue_t*) aux);
+	}
+	return 0;
 }
