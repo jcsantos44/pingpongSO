@@ -39,6 +39,7 @@ typedef struct
 {
   int contador; //contador do semaforo
 	struct task_t *fila; //fila de tasks aguardando o semaforo	
+	int destruido; //flag indica se foi destruido
 } semaphore_t ;
 
 // estrutura que define um mutex

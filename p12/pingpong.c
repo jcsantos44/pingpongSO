@@ -21,7 +21,7 @@
 
 #define STACKSIZE 32768		/* tamanho de pilha das threads */
 #define _XOPEN_SOURCE 600	/* para compilar no MacOS */
-#define DEBUG
+//#define DEBUG
 
 /*****************************************************/
 
@@ -634,13 +634,14 @@ int sem_create (semaphore_t *s, int value)
 	#endif
 	s->contador = value;
 	s->fila = NULL;
+	s->destruido = 0;
 
 	return 0;
 }
 
 int sem_down (semaphore_t *s)
 {
-	if(s == NULL){
+	if(s == NULL || s->destruido == 1){
 		#ifdef DEBUG
 		printf("sem_down: Semaforo requisitado invalido. ERRO.\n");
 		#endif
@@ -715,6 +716,7 @@ int sem_destroy (semaphore_t *s)
 	}
 	s->contador = 0;
 	s->fila = NULL;
+	s->destruido = 1;
 	s = NULL;
 	return 0;
 }
@@ -984,6 +986,7 @@ int mqueue_destroy (mqueue_t *queue)
 		#endif
 		return -1;
 	}
+	queue = NULL;
 	return 0;
 }
 
