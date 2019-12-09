@@ -1,0 +1,212 @@
+int mqueue_create (mqueue_t *queue, int max, int size)
+{
+	if(queue == NULL){//se nao tem semaforo, retorna erro
+		#ifdef DEBUG
+		printf("mqueue_create: fila de mensagem invalida. ERRO.\n");
+		#endif
+		return -1;
+	}
+
+	#ifdef DEBUG
+	printf("mqueue_create: Criando nova fila de mensagem.\n");
+	#endif
+	//iniciando as variaveis
+	queue->maxmsg = max;
+	queue->size = size;
+	queue->read_pointer = 0;//ponteiro de leitura comeca no indice 0
+	queue->write_pointer = 0;//ponteiro de escrever comeca no indice 0
+	queue->fila_msg = malloc(max*size);//buffer circular
+	if(sem_create(&queue->sem_vagas, max) < 0){//iniciando semaforo
+		#ifdef DEBUG
+		printf("mqueue_create: Erro ao criar semaforo de vagas. ERRO.\n");
+		#endif
+		return -1;
+	}
+	if(sem_create(&queue->sem_acesso, 1) < 0){//iniciando semaforo
+		#ifdef DEBUG
+		printf("mqueue_create: Erro ao criar semaforo de acesso. ERRO.\n");
+		#endif
+		return -1;
+	}
+	if(sem_create(&queue->sem_itens, 0) < 0){//iniciando semaforo
+		#ifdef DEBUG
+		printf("mqueue_create: Erro ao criar semaforo de itens. ERRO.\n");
+		#endif
+		return -1;
+	}
+	return 0;
+}
+
+int mqueue_send (mqueue_t *queue, void *msg){
+	int i;
+	void *dest,*orig;
+	if(queue == NULL){//se nao tem fila de msg, retorna erro
+		#ifdef DEBUG
+		printf("mqueue_send: fila de mensagem invalida. ERRO.\n");
+		#endif
+		return -1;
+	}
+	
+	if(sem_down(&queue->sem_vagas) < 0){//requisita o semaforo pra ver se tem vaga
+		#ifdef DEBUG
+		printf("mqueue_send: fila de mensagem nao pode mais receber msgs. ERRO.\n");
+		#endif
+		//semaforo deu erro ou fila de msg nao pode mais receber msgs
+		return -1;
+	}
+
+	if(sem_down(&queue->sem_acesso) < 0){
+		#ifdef DEBUG
+		printf("mqueue_send: fila de mensagem sendo usada por outro processo. ERRO.\n");
+		#endif
+		//semaforo deu erro ou fila de msg ja esta sendo usada
+		return -1;
+	}
+	
+	#ifdef DEBUG
+	printf("mqueue_send: Mensagem enviada para a fila.\n");
+	#endif
+	i = queue->write_pointer * queue->size;//indice do ponteiro de escrever
+	#ifdef DEBUG
+	printf("mqueue_send: indice <%d> e MAX <%d>.\n", queue->write_pointer, queue->maxmsg);
+	#endif
+	mqueue_t* aux_fila = (mqueue_t*)queue->fila_msg;//type cast para nao dar warning de dereference
+	dest  = &aux_fila[i];//endereco da variavel de destino da mensagem
+	orig = msg; //endereco da variavel de origem da mensagem
+	memcpy(dest,orig,queue->size);//copia queue->size bytes da mensagem em orig para o dest
+	//move o ponteiro de escrever
+	queue->write_pointer = (queue->write_pointer+1) % queue->maxmsg;//avanca o ponteiro
+
+	//add item no semaforo para indicar que a fila pode ser lida
+	if(sem_up(&queue->sem_itens) < 0){
+		#ifdef DEBUG
+		printf("mqueue_send: Semaforo de itens nao pode ser liberado. ERRO.\n");
+		#endif
+		return -1;
+	}
+	//libera o acesso a fila de msg
+	if(sem_up(&queue->sem_acesso) < 0){
+		#ifdef DEBUG
+		printf("mqueue_send: Semaforo de acesso nao pode ser liberado. ERRO.\n");
+		#endif
+		return -1;
+	}
+	return 0;	
+}
+
+int mqueue_recv (mqueue_t *queue, void *msg)
+{
+	int i;
+	void *dest,*orig;
+	if(queue == NULL){//se nao tem fila de msg, retorna erro
+		#ifdef DEBUG
+		printf("mqueue_recv: fila de mensagem invalida. ERRO.\n");
+		#endif
+		return -1;
+	}
+	
+	if(sem_down(&queue->sem_itens) < 0){//verifica se tem item pra ser lido na fila de msg
+		#ifdef DEBUG
+		printf("mqueue_recv: fila de mensagem nao possui nenhuma msg. ERRO.\n");
+		#endif
+		//semaforo deu erro ou fila de msg nao tem msg
+		return -1;
+	}
+
+	if(sem_down(&queue->sem_acesso) < 0){
+		#ifdef DEBUG
+		printf("mqueue_recv: fila de mensagem sendo usada por outro processo. ERRO.\n");
+		#endif
+		//semaforo deu erro ou fila de msg ja esta sendo usada
+		return -1;
+	}
+
+	#ifdef DEBUG
+	printf("mqueue_recv: Recebendo mensagem da fila.\n");
+	#endif
+	mqueue_t* aux_fila = (mqueue_t*)queue->fila_msg;//type cast para nao dar warning de dereference
+	i = queue->read_pointer * queue->size;//indice do ponteiro de leitura
+	dest  = msg;//endereco da variavel de destino da mensagem
+	orig = &(aux_fila[i]); //endereco da variavel de origem da mensagem
+	memcpy(dest,orig,queue->size);//copia queue->size bytes da mensagem em orig para o dest
+
+	//move o ponteiro de leitura
+	queue->read_pointer = (queue->read_pointer+1) % queue->maxmsg;
+	//libera item no semaforo para indicar que liberou vaga
+	if(sem_up(&queue->sem_vagas) < 0){
+		#ifdef DEBUG
+		printf("mqueue_send: Semaforo de vagas nao pode ser liberado. ERRO.\n");
+		#endif
+		return -1;
+	}
+	//libera o acesso a fila de msg
+	if(sem_up(&queue->sem_acesso) < 0){
+		#ifdef DEBUG
+		printf("mqueue_send: Semaforo de acesso nao pode ser liberado. ERRO.\n");
+		#endif
+		return -1;
+	}
+	return 0;
+}
+
+int mqueue_destroy (mqueue_t *queue)
+{
+	#ifdef DEBUG
+	printf("mqueue_destroy: destruindo fila de mensagem.\n");
+	#endif
+
+	if(queue == NULL){//se nao tem fila de msg, retorna erro
+		#ifdef DEBUG
+		printf("mqueue_destroy: fila de mensagem invalida. ERRO.\n");
+		#endif
+		return -1;
+	}
+
+	//destruindo a fila
+	queue->maxmsg = 0;
+	queue->size = 0;
+	queue->read_pointer = 0;//ponteiro de leitura comeca no indice 0
+	queue->write_pointer = 0;//ponteiro de escrever comeca no indice 0
+	free(queue->fila_msg);
+	#ifdef DEBUG
+	printf("mqueue_destroy: destruindo semaforos da fila.\n");
+	#endif
+	if(sem_destroy(&queue->sem_vagas) < 0){//destruindo semaforo
+		#ifdef DEBUG
+		printf("mqueue_destroy: Erro ao destruir semaforo de vagas. ERRO.\n");
+		#endif
+		return -1;
+	}
+	if(sem_destroy(&queue->sem_acesso) < 0){//destruindo semaforo
+		#ifdef DEBUG
+		printf("mqueue_destroy: Erro ao destruir semaforo de acesso. ERRO.\n");
+		#endif
+		return -1;
+	}
+	if(sem_destroy(&queue->sem_itens) < 0){//destruindo semaforo
+		#ifdef DEBUG
+		printf("mqueue_destroy: Erro ao destruir semaforo de itens. ERRO.\n");
+		#endif
+		return -1;
+	}
+	queue = NULL;
+	return 0;
+}
+
+int mqueue_msgs (mqueue_t *queue)
+{
+	semaphore_t *aux;
+	#ifdef DEBUG
+	printf("mqueue_msgs: Recuperando numero de mensagens na fila.\n" );
+	#endif
+
+	if(queue == NULL){//se nao tem fila de msg, retorna erro
+		#ifdef DEBUG
+		printf("mqueue_msgs: fila de mensagem invalida. ERRO.\n");
+		#endif
+		return -1;
+	}
+	
+	aux = &queue->sem_itens;//semaforo contendo o numero de mensagens na fila
+	return aux->contador;
+}
